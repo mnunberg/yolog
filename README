@@ -1,0 +1,23 @@
+This is a simple logging module, in the spirit of my perl module which does
+a similar thing (actually, my perl module was inspired by this).
+
+This module is quite simple, but handy if you would like to debug in the
+terminal with colors. It also avoids having to use '\n', and automatically
+places the line number and a file-global 'module-name'.
+
+To use:
+/*Include the yolog.h header file*/
+#include "yolog.h>
+/*Then initialize file-local parameters. This *MUST* be done*/
+YOLOG_STATIC_INIT("MyModule", YOLOG_INFO);
+/*Then use in code*/
+void do_something(void) {
+	yolog_debug("This won't show");
+	yolog_info("Hello World");
+}
+/*When calling do_something(), the following should print to the screen:*/
+[MyModule] do_something:6 Hello World
+
+This code is licensed under the LGPL, meaning you may include it in your code
+via dynamically linking (compile and link yolog as a library), OR statically link
+assuming your program is GPL compatible. See LICENSE for more details
