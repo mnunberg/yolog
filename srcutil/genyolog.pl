@@ -13,6 +13,77 @@ struct __PACKAGE__, [
     constant => '$'
 ];
 
+package Yolog::DebugMacro;
+use strict;
+use warnings;
+use Class::Struct;
+struct __PACKAGE__, [
+    'prefix', => '$',
+    'level', => '$',
+    'ctxvar' => '$',
+    'proj' => '$',
+    'c89' => '$',
+];
+
+sub macro_name {
+    my $self = shift;
+    return $self->proj->gen_macro_name($self->prefix, $self->level);
+}
+
+sub const_level {
+    my $self = shift;
+    return '<YOLOGNS_UC>_' . uc($self->level);
+}
+
+sub generate {
+    my $self = shift;
+    my $txt;
+    
+    if ($self->c89) {
+        $txt = <<'EOF';
+        
+#define STUBMACRO(args) \
+if (<implicit_begin>( \
+    YO__CTX__, \
+    YO__LEVEL__, \
+    __FILE__, \
+    __LINE__, \
+    __func__)) \
+{ \
+    <implicit_log> args; \
+    <implicit_end>(); \
+}
+EOF
+
+    } else {
+        $txt = <<'EOF';
+#define STUBMACRO(...) \
+<logfunc>(\
+    YO__CTX__,\
+    YO__LEVEL__, \
+    __FILE__, \
+    __LINE__, \
+    __func__, \
+    ## __VA_ARGS__)
+EOF
+
+    }
+    return $txt;
+    
+}
+sub preprocess {
+    my ($self,$txt) = @_;
+    
+    my $macro_name = $self->macro_name();
+    my $ctxvar = $self->ctxvar();
+    my $clevel = $self->const_level();
+
+    $txt =~ s/STUBMACRO/$macro_name/g;
+    $txt =~ s/YO__CTX__/$ctxvar/g;
+    $txt =~ s/YO__LEVEL__/$clevel/g;
+    return $txt;
+}
+
 package Yolog::Project;
 use Class::Struct;
 use strict;
@@ -27,6 +98,7 @@ struct __PACKAGE__, [
     'c89_strict' => '$',
     'yolog_static' => '$',
     'yologns' => '$',
+    'env_auto' => '$',
     
     'header_buf' => '$',
     'source_buf' => '$',
@@ -34,7 +106,6 @@ struct __PACKAGE__, [
     'var_implicit_begin' => '$',
     'var_implicit_end' => '$',
     'var_implicit_log' => '$',
-    
     
     'var_logfunc' => '$',
     'var_macro_prefix' => '$',
@@ -46,8 +117,8 @@ struct __PACKAGE__, [
     'var_proj_infofunc' => '$',
     'var_proj_countfunc' => '$',
     
-    'env_color' => '$',
-    'env_debug' => '$',
+    'var_env_color' => '$',
+    'var_env_debug' => '$',
     'outdir'    => '$',
     'yolog_srcdir' => '$',
 ];
@@ -68,6 +139,9 @@ my @FNAMES = qw(
     ctxpfix
     ctxcount
     ctxarray
+    
+    env_color
+    env_debug
 );
 
 
@@ -87,6 +161,15 @@ sub create {
     $opts{var_yolog_initfunc}   = "<YOLOGNS>_init_defaults";
     $opts{var_proj_initfunc}    = sprintf("%s_yolog_init", $opts{name});
     
+    foreach (qw(color debug)) {
+        my $k = "var_env_$_";
+        if ($opts{$k}) {
+            $opts{$k} = sprintf('"%s"', $opts{$k});
+        } else {
+            $opts{$k} = "NULL";
+        }
+    }
+        
     $opts{macro_prefix} ||= $opts{name};
     $opts{header_buf} = "";
     $opts{source_buf} = "";
@@ -181,61 +264,9 @@ sub gen_macro_name {
     return join("_", @comps);
 }
 
-sub _gen_c89_logger {
-    my ($self,$prefix,$ctxvar,$level) = @_;
-    
-    my $macroname = $self->gen_macro_name($level);
-    my $const_level = '<YOLOGNS_UC>_' . uc($level);
-    
-    my $templ = <<'EOF';
-
-#define STUBMACRO(args) \
-if (<implicit_begin>( \
-    YO__CTX__, \
-    YO__LEVEL__, \
-    __FILE__, \
-    __LINE__, \
-    __func__)) \
-{ \
-    <implicit_log> args; \
-    <implicit_end>(); \
-}
-EOF
-    $templ =~ s/YO__CTX__/$ctxvar/g;    
-    $templ =~ s/YO__LEVEL__/$const_level/g;
-    $templ =~ s/STUBMACRO/$macroname/g;
-    
-    $self->append_header($self->process_template($templ));}
-
-sub _gen_c99_logger {
-    my ($self,$prefix,$ctxvar,$level) = @_;
-    
-    my $macro_name = $self->gen_macro_name($prefix, $level);
-    my $level_const = sprintf("<YOLOGNS_UC>_%s", uc($level));
-    
-    my $templ = <<'EOF';
-
-#define STUBMACRO(...) \
-<logfunc>(\
-    YO__CTX__,\
-    YO__LEVEL__, \
-    __FILE__, \
-    __LINE__, \
-    __func__, \
-    ## __VA_ARGS__)
-EOF
-        
-    $templ =~ s/YO__CTX__/$ctxvar/g;
-    $templ =~ s/YO__LEVEL__/$level_const/;
-    $templ =~ s/STUBMACRO/$macro_name/g;
-    
-    $self->append_header($self->process_template($templ));
-}
-
 sub generate_log_macros {
     my ($self,$subsys) = @_;
     my $ctxvar;
-    
     my $prefix;
     
     if ($subsys) {
@@ -249,14 +280,25 @@ sub generate_log_macros {
     }
     
     foreach my $level (@LEVELS) {
+        my $mobj = Yolog::DebugMacro->new(prefix => $prefix,
+                                          level => $level,
+                                          ctxvar => $ctxvar,
+                                          proj => $self,
+                                          c89 => $self->c89_strict);
         
-        # if we're using strict C89 mode, then we can't do __VA_ARGS__, and must
-        # define an actual symbol for this :/
-        if ($self->c89_strict) {
-            $self->_gen_c89_logger($prefix, $ctxvar, $level);
-        } else {
-            $self->_gen_c99_logger($prefix, $ctxvar, $level);
-        }
+        my $txt = <<'EOF';
+#if (defined <PROJNS_UC>_NDEBUG_LEVEL \
+    && <PROJNS_UC>_NDEBUG_LEVEL > YO__LEVEL__)
+#define STUBMACRO(args)
+#else
+EOF
+        $txt .= $mobj->generate();
+        
+        $txt .= "#endif /* <PROJNS_UC>_NDEBUG_LEVEL */\n";
+        
+        $txt = $mobj->preprocess($txt);
+        $txt = $self->process_template($txt);
+        $self->append_header($txt);
     }
 }
 
@@ -303,7 +345,18 @@ void
 #define <PROJNS>_subsys_count() (<ctxcount>)
 
 EOF
+    
+    if (!$self->yolog_static) {
+        $templ = <<'EOF' . $templ;
 
+/** Extra defines so project-specific prefixes can still use the
+ * shared library
+ */
+typedef yolog_context <PROJNS>_context;
+#define <PROJNS>_get_global yolog_get_global
+
+EOF
+    }
     $templ = $self->process_template($templ);
     $self->append_header($templ);
 }
@@ -349,8 +402,8 @@ EOF
         <ctxcount>,
         <YOLOGNS_UC>_DEFAULT,
         <YOLOGNS_UC>_FLAGS_DEFAULT,
-        "$env_color",
-        "$env_level"
+        <env_color>,
+        <env_debug>
     );
     
 }   
@@ -395,7 +448,9 @@ my %ConfMap = (
     'macro_prefix' => ['macro_prefix', undef],
     'outdir' => ['outdir', \$OutDir],
     'yolog_srcdir' => ['yolog_src', \$YologDir],
-    'yolog_static' => ['static', \$UseStatic]
+    'yolog_static' => ['static', \$UseStatic],
+    'var_env_color' => ['env_color', undef],
+    'var_env_debug' => ['env_debug', undef]
 );
 
 my %confhash;
@@ -463,8 +518,22 @@ if (!$PrintOnly) {
 ## If we're using static mode, then we need to copy over the entire yolog
 ## source code.
 
-my $final_src = "";
-my $final_hdr = "";
+my $final_src = <<EOF;
+
+/*
+This file was automatically generated from '$0'.
+It contains initialization routines and possible a modified version of
+the Yolog source code for embedding
+*/
+
+EOF
+my $final_hdr = <<EOF;
+
+/*
+This file was automatically generated from '$0'. It contains the macro
+wrappers and function definitions.
+*/
+EOF
 
 
 sub preprocess_file {
@@ -478,11 +547,11 @@ sub preprocess_file {
 }
 
 if ($Project->yolog_static) {
-    $final_src = preprocess_file("src/yolog.c");
-    $final_hdr = preprocess_file("src/yolog.h");
+    $final_src .= preprocess_file("$YologDir/yolog.c");
+    $final_hdr .= preprocess_file("$YologDir/yolog.h");
 } else {
-    $final_hdr = "#include <yolog.h>\n" . $final_hdr;
-    $final_src = sprintf('#include "%s_yolog.h"',
+    $final_hdr .= "#include <yolog.h>\n" . $final_hdr;
+    $final_src .= sprintf('#include "%s_yolog.h"',
                          $Project->name) . "\n" . $final_src;
 }
 

@@ -1,3 +1,5 @@
 autotest
 *.so
 yolog_out/*
+*.swp
+demo_*

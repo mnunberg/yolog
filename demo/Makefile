@@ -1,0 +1,27 @@
+all: demo_$(PREFIX)
+
+# Directory
+DIR=$(PREFIX)
+
+# Yolog output directory
+OUTDIR=$(DIR)/yolog_out
+
+# Sourc code..
+SRC=$(DIR)/demo.c
+
+# The actual generated source file
+YOSRC=$(DIR)/yolog_out/myproj_yolog.c
+
+CFLAGS += -pthread
+
+$(SRC): demo.c
+	-mkdir $(DIR)
+	cp $^ $(DIR)/
+
+$(YOSRC): $(YODEPS) $(YOCMD)
+	$(YOCMD) $(YOARGS) -o $(OUTDIR)
+
+demo_$(PREFIX): $(SRC) $(YOSRC)
+	$(CC) $(CFLAGS) -o $@ $^ \
+		$(DEMO_LFLAGS)
+
