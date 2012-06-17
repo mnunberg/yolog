@@ -1,0 +1,3 @@
+autotest
+*.so
+yolog_out/*

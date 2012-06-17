@@ -1,0 +1,29 @@
+# What prefix to use for symbols
+symbol_prefix myproj
+
+# What prefix to use for the debugging macros
+# (defaults to the symbol_prefix)
+macro_prefix log
+
+# Whether to embed yolog into your project
+static 0
+
+# Whether to enable C89-compliant macros
+# c89 0
+
+# Environment variable to enable color
+env_color MYAPP_DEBUG_COLOR
+
+# Environment variable to enable/modify the debugging level
+env_debug MYAPP_DEBUG_LEVEL
+
+# Enumerate the subsystems which will have their own output
+# control. This option can be supplied multiple times
+subsys io
+subsys main
+subsys config
+
+# Directory to place the output files.
+# The output files will be named $outdir/<prefix>_yolog.{c,h}
+# where <prefix> is the symbol prefix
+outdir yolog_out

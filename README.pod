@@ -1,0 +1,78 @@
+=head1 YOLOG
+
+Yolog - Free Contextual Logging For All!
+
+=head1 DESCRIPTION
+
+C<Yolog> is a small library (but not only a library) whose purpose is to
+provide a customizable and easy way for projects to log screen information.
+
+Basically 'print-debugging' on steroids, Yolog provides contextual information
+with each message.
+
+The following information can be obtained with each message
+
+=over
+
+=item Thread Identification
+
+=item Process Identification
+
+=item Source File/Line/Function
+
+=item User Defined Subsystem
+
+=item Color-coded Severity Display
+
+=back
+
+Yolog can be used as a DSO, or it can be embedded into your project with the
+C<genyolog.pl> script.
+
+Yolog can employ variadic macros as present in C99, or fallback to C89 mode
+with some clever tricks.
+
+Yolog should be simple to use in your code:
+
+DSO Version:
+
+    #include <yolog.h>
+
+    static void myfunc(void)
+    {
+        yolog_debug("This won't print because severity is too low");
+        yolog_warn("But this will show a warning");
+    }
+
+    int main(void) {
+        yolog_init_defaults(
+            NULL, /* no specialized context */
+            0, /* no contexts to count */,
+            YOLOG_WARN, /* minimum severity level to log */
+            "DEBUG", /* environment variable to control severity filtering */
+            "DEBUG_COLOR" /* environment variable to control color output */
+        );
+        myfunc();
+        return 0;
+    }
+
+Embedded Version:
+
+    #include "yolog_out/myapp_yolog.h"
+    static void myfunc(void)
+    {
+        myapp_debug("This won't print");
+        myapp_warn("This will print a warning");
+    }
+
+    int main(void)
+    {
+        myapp_yolog_init();
+        myfunc();
+        return 0;
+    }
+
+The embedded Yolog generated source will configure logging functions
+which will have a namespace of your choosing prefixed to them. This
+avoids name clashes and makes it interoperable with any other logging
+module/wrapper you wish to use.
