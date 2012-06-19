@@ -168,7 +168,8 @@ yolog_init_defaults(yolog_context *contexts,
 
         if (ctx->level == YOLOG_DEFAULT) {
             ctx->level = default_level;
-            if (ctx->level == default_level) {
+
+            if (ctx->level == YOLOG_DEFAULT) {
                 ctx->level = YOLOG_INFO;
             }
         }
@@ -215,7 +216,7 @@ yolog_get_formats(yolog_context *ctx,
             colors->co_line = "\033[" _FG _YELLOW "m";
             break;
         case YOLOG_DEBUG:
-            colors->co_line = "\033[" _DIM_FG ":" _WHITE "m";
+            colors->co_line = "\033[" _DIM_FG ";" _FG _CYAN "m";
             break;
         default:
             colors->co_line = "";
