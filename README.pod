@@ -4,95 +4,154 @@ Yolog - Free Contextual Logging For All!
 
 =head1 DESCRIPTION
 
-C<Yolog> is a small library (but not only a library) whose purpose is to
-provide a customizable and easy way for projects to log screen information.
+C<Yolog> is a customizable but easy to use logging library. It allows
+many options for both file and screen logging.
 
-Basically 'print-debugging' on steroids, Yolog provides contextual information
-with each message.
+Yolog is built from the ground up to be entirely embeddable in your project,
+meaning that it does not have to be built as a DSO dependency and will not
+conflict with other libraries or projects using Yolog (though it can also
+live as a DSO).
 
-The following information can be obtained with each message
+Yolog can provide contextual source-based information about logging messages
+(via format strings), can invoke callbacks for each message, and can be
+configured during compile time to make some logging operations as no-ops
+(helping performance).
+
+
+=head1 CONCEPTS
+
+=head2 Subsystems/Facilities
+
+This is a user-defined facility or subsystem. Your application could (and
+most probably should) have different subsystem. A subsystem represents a
+logical component within your application which emits messages; e.g. a
+subsystem named C<io> which will emit messages about I/O status and error.
+
+Perhaps your I/O subsystem then dispatches data to a stream parser, which
+may emit its own messages and be called C<parse>.
+
+=head2 Levels/Severity
+
+Severity is a number of 'importance' the message has to offer. Yolog
+defines several severity levels.
+
+The explanation of the levels is from most to least severe, and are
+entirely advisory
 
 =over
 
-=item Thread Identification
+=item CRIT
 
-=item Process Identification
+This is a critical message, i.e. something seriously wrong with the
+application.
 
-=item Source File/Line/Function
+=item ERROR
 
-=item User Defined Subsystem
+Messages which represent environmental or user errors
 
-=item Color-coded Severity Display
+=item WARN
+
+Messages about things which might be wrong or unusual
+
+=item INFO
+
+Higher level messages indicating status or events
+
+=item DEBUG
+
+Lower level messages indicating status and events
+
+=item TRACE
+
+Messages for function entry/leave, frequently repeated lines
+of code
+
+=item RANT
+
+Miscellaneous messages, usually temporary (i.e. the value of a certain
+variable at a certain point in time)
 
 =back
 
-Yolog can be used as a DSO, or it can be embedded into your project with the
-C<genyolog.pl> script.
+=head2 Outputs and Control
 
-Yolog can employ variadic macros as present in C99, or fallback to C89 mode
-with some clever tricks.
+Yolog allows for multiple destinations for messages, these destinations
+may be configured on a per-subsystem basis.
 
-Yolog should be simple to use in your code:
+The following targets may be configured
 
-DSO Version:
+=over
 
-    #include <yolog.h>
+=item Screen
 
-    static void myfunc(void)
-    {
-        yolog_debug("This won't print because severity is too low");
-        yolog_warn("But this will show a warning");
-    }
+This is the default target and prints messages to standard error
 
-    int main(void) {
-        yolog_init_defaults(
-            NULL, /* no specialized context */
-            0, /* no contexts to count */,
-            YOLOG_WARN, /* minimum severity level to log */
-            "DEBUG", /* environment variable to control severity filtering */
-            "DEBUG_COLOR" /* environment variable to control color output */
-        );
-        myfunc();
-        return 0;
-    }
+=item Global Log
 
-Embedded Version:
+This is an application-wide logfile, subsystems can opt to send
+messages here as well
 
-    #include "yolog_out/myapp_yolog.h"
-    static void myfunc(void)
-    {
-        myapp_debug("This won't print");
-        myapp_warn("This will print a warning");
-    }
+=item Subsystem Log
 
-    int main(void)
-    {
-        myapp_yolog_init();
-        myfunc();
-        return 0;
-    }
+This is a per-subsystem log file, subsystems may additionally log
+to this file as well.
 
-The embedded Yolog generated source will configure logging functions
-which will have a namespace of your choosing prefixed to them. This
-avoids name clashes and makes it interoperable with any other logging
-module/wrapper you wish to use.
+=back
+
+Each output can be configured to control its minimum allowable severity
+level. So for example, the C<io> subsystem's C<DEBUG> and lower messages
+may be logged to the screen, but not to the file.
+
+Additionally, each output may have its own format string.
+
+=head2 Statements
+
+In order to avoid verbose logging statements, C<Yolog> generates macro
+stubs for all subsystem+level combinations which result in identifiers which
+can accept the messages.
+
+The preferred format for the identifier is
+
+    log_<subsys>_<severity>
+
+So e.g. a C<DEBUG>-level message from the C<io> subsystem would be sent
+as
+
+    log_io_debug("IO Stuff...");
+
+Macros function exactly as L<printf(3)> and may accept printf format
+strings and arguments.
+
+=head2 Output configuration
+
+C<Yolog> provides a config file parser which can at runtime determine
+and modify output control. See C<config/logging2.conf> for an example.
+
+=head1 HOW IT WORKS
+
+C<Yolog> will generate a stub header and source file for your project.
+These files provide the necessary support and glue for customizing your
+subsystems.
+
+The header file contains the macro stubs (which can become quite large,
+but is not an issue since they are all expanded to a single function call
+during preprocessing).
+
+The source file contains a wrapper init function, and if configured in
+'static' mode, contains the source code of C<Yolog> itself, with its symbols
+specially mangled to avoid conflicts.
+
+The contents and dependencies of these headers are none, so any C compiler
+should be able to compile and embed the generated source code into your
+project without any fuss. By default, C<Yolog> generates C99 compatible
+code, but has an option for generating C89 code as well (which does not
+make use of variadic macros)
 
 
-=head2 CONFIGURING
+=head1 USING
 
-Yolog is designed to be embedded easily. The initial cost is in learning the
-script and possible having Perl installed (it's already on every unix out there)
-to generate the source code.
-
-The code generated by the script can be either intended for wrapping the Yolog
-dynamic library (C<libyolog>) in which case the actual logging code is not
-embedded into your project, but the customized debugging and initialization
-wrappers are still provided. Yolog can also be static in which it will create
-a copy of the source code, mangling the symbols in such a way to avoid
-possible conflicts with any other logging library that may be in use.
-
-The embedding of Yolog requires knowing the location to the Yolog source
-itself.
+In order to use C<Yolog> you must tell it about the names and subsystems
+you wish to use in your project
 
 The file C<conf/sample.cnf> shows a simple configuration in conjunction with a
 simple 'project' (located in the C<demo> directory). This project has Makefile
@@ -111,6 +170,7 @@ A simple configuration should look like this
     # Environment variables to manipulate the debugging level and options
     env_color MYAPP_DEBUG_COLOR
     env_debug MYAPP_DEBUG_LEVEL
+    env_prefs MYAPP_DEBUG_PREFS
 
     # Now, sometimes an app wants more than a single logging source. This helps
     # filter out messages based on subsystem/component rather than simple severity.
@@ -140,8 +200,7 @@ the following would be done in order to use the logging libraries
     /* other stuff */
 
     int main(void) {
-        myapp_yolog_init();
-
+        myapp_yolog_init(NULL);
         log_debug("This is a debug message");
         log_io_error("IO Error!");
         log_config_warn("Configuration Option has no effect!");
@@ -151,32 +210,54 @@ Simples!
 
 If you wanted to add some color
 
-    $ export MYAPP_DEBUG_COLOR = 1
+    $ export MYAPP_DEBUG_COLOR=1
     $ ./myapp
 
 Or if you wanted to silence all debug output
 
-    $ export MYAPP_DEBUG_LEVEL = 1000
+    $ export MYAPP_DEBUG_LEVEL=1000
     $ ./myapp
 
-Which sets the threshhold for the minimum allowed level.
+If you wanted to see all C<TRACE> and higher messages from
+the C<IO> subsystem
 
-=head2 FORMAT STRINGS
+    $ export MYAPP_DEBUG_PREFS="io:trace"
+    $ ./myapp
 
-Yolog can be configured with format strings. To see the various
-options, look in the header
 
 =head2 PORTABILITY
 
 I've managed to compile libyolog on GCC for Linux, Windows, Solaris.
 
-The sample application has POSIX-isms (like pthreads) and won't work
-on Windows (though if someone cares to point me on how to accomplish
-this, I'm open..).
+The C99-mode macros should work anywhere and require little fuss.
 
-Additionally, goodies like thread display, implicit locked context, and
-locking the output stream so two threads don't write to it simultaneously
-using C<flockfile> are not available on Win32.
+=head3 Threads
+
+Because yolog can be used from multiple threads, there arise two
+issues.
+
+=over
+
+=item FILE* locking
+
+The stdio's C<FILE> pointer must be locked by each thread. On POSIX
+sysstems this is done with C<flockfile> and C<funlockfile>. I have yet
+to discover something like this for win32
+
+=item C89 mode
+
+C89 mode is not 'atomic' in the sense that the macros must set contextual
+information separately from the actual logging messages. This means a global
+context placeholder must exist and be set for each message. On POSIX system
+this global context is protected by C<pthreads>. As I am not a win32 programmer
+I have not had the time to play around with windows threads here
+
+=item Thread and Process IDs
+
+Yolog's format string allows thread and process ID specifiers. On POSIX
+systems this is easy; on Windows systems these both fallback to C<-1>
+
+=back
 
 =head1 AUTHOR AND COPYRIGHT
 
