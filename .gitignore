@@ -3,3 +3,4 @@ autotest
 yolog_out/*
 *.swp
 demo_*
+logdir/*

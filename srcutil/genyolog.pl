@@ -1,6 +1,35 @@
 #!/usr/bin/perl
 
-my @LEVELS = qw(debug info warn error crit);
+# logging levels
+my @LEVELS = qw(rant trace state debug info warn error crit);
+
+# misc identifiers/symbols, lower-cased
+# specifically, these are the symbols we wish to define yolog_* *back* to
+# if using a static mode. So basically only identifiers which may be used by
+# the application belong here
+my @YOLOG_SYMS_lc = qw(
+    fmt_compile
+    set_fmtstr
+    set_screen_format
+    fmt_st
+    
+    context
+    callback
+    
+    level_t
+    flags_t
+    level_info
+    logger
+    vlogger
+    init_defaults
+    get_global
+    implicit_logger
+    implicit_end
+);
+
+# misc identifiers/symbols, upper-cased
+my @YOLOG_SYMS_uc = qw();
+
 my $indent = " " x 4;
 
 package Yolog::Subsystem;
@@ -111,14 +140,18 @@ struct __PACKAGE__, [
     'var_macro_prefix' => '$',
     'var_ctxarray' => '$',
     'var_ctxtype' => '$',
+    'var_grouptype' => '$',
+    'var_ctxgroup' => '$',
     
     'var_proj_initfunc' => '$',
     'var_yolog_initfunc' => '$',
+    'var_yolog_confparse' => '$',
     'var_proj_infofunc' => '$',
     'var_proj_countfunc' => '$',
     
     'var_env_color' => '$',
     'var_env_debug' => '$',
+    'var_env_prefs' => '$',
     'outdir'    => '$',
     'yolog_srcdir' => '$',
 ];
@@ -134,23 +167,30 @@ my @FNAMES = qw(
     proj_countfunc
     
     yolog_initfunc
+    yolog_confparse
     
     ctxtype
     ctxpfix
     ctxcount
     ctxarray
+    ctxgroup
+    grouptype
     
     env_color
     env_debug
+    env_prefs
 );
 
 
 sub create {
     my ($cls,%opts) = @_;
     $opts{var_logfunc} ||= "<YOLOGNS>_logger";
+    
     $opts{var_ctxtype} ||= "<YOLOGNS>_context";
+    $opts{var_grouptype} = "<YOLOGNS>_context_group";
     
     $opts{var_ctxarray} = "<PROJNS>_logging_contexts";
+    $opts{var_ctxgroup} = "<PROJNS>_log_group";
         
     $opts{var_proj_infofunc}    = "<PROJNS>_subsys_info";
     $opts{var_proj_countfunc}   = "<PROJNS>_subsys_count";
@@ -159,9 +199,11 @@ sub create {
     $opts{var_implicit_log}     = "<YOLOGNS>_implicit_logger";
     
     $opts{var_yolog_initfunc}   = "<YOLOGNS>_init_defaults";
+    $opts{var_yolog_confparse}  = "<YOLOGNS>_parse_file";
+    
     $opts{var_proj_initfunc}    = sprintf("%s_yolog_init", $opts{name});
     
-    foreach (qw(color debug)) {
+    foreach (qw(color debug prefs)) {
         my $k = "var_env_$_";
         if ($opts{$k}) {
             $opts{$k} = sprintf('"%s"', $opts{$k});
@@ -330,11 +372,12 @@ sub generate_cproto {
 
 /** Array of context object for each of our subsystems **/
 extern <ctxtype>* <ctxarray>;
+extern <grouptype> <ctxgroup>;
 
 /** Function called to initialize the logging subsystem **/
 
 void
-<proj_initfunc>(void);
+<proj_initfunc>(const char *configfile);
 
 
 /** Macro to retrieve information about a specific subsystem **/
@@ -352,32 +395,40 @@ EOF
 /** Extra defines so project-specific prefixes can still use the
  * shared library
  */
-typedef yolog_context <PROJNS>_context;
-#define <PROJNS>_get_global yolog_get_global
-
 EOF
+        foreach my $sym (@YOLOG_SYMS_lc) {
+            $templ .= "#define <PROJNS>_$sym yolog_$sym\n";
+        }
     }
+
     $templ = $self->process_template($templ);
     $self->append_header($templ);
 }
 
 sub generate_cbody {
     my $self = shift;
+    my $templ = "";
     
-    my $templ = <<'EOF';
+    if ($self->yolog_static) {
+        $templ .= "#define GENYL_YL_STATIC\n";
+    }
+    
+    $templ .= <<'EOF';
     
 static <ctxtype> <ctxarray>_real[
     <ctxcount>
 ] = { { 0 } };
 
 <ctxtype>* <ctxarray> = <ctxarray>_real;
+<grouptype> <ctxgroup>;
 
+#include <string.h> /* for memset */
+#include <stdlib.h> /* for getenv */
 void
-<proj_initfunc>(void)
+<proj_initfunc>(const char *filename)
 {
-
     <ctxtype>* ctx;
-
+    memset(<ctxarray>, 0, sizeof(<ctxtype>) * <ctxcount>);
 EOF
 
     foreach my $sys (@{$self->subsystems}) {
@@ -396,19 +447,46 @@ EOF
     my $env_level = sprintf("%s_DEBUG_LEVEL", uc $self->name);
 
     $templ .= <<"EOF";
+    
+   /**
+    * initialize the group so it contains the
+    * contexts and their counts
+    */
+    
+   memset(&<ctxgroup>, 0, sizeof(<ctxgroup>));
+   <ctxgroup>.ncontexts = <ctxcount>;
+   <ctxgroup>.contexts = <ctxarray>;
    
    <yolog_initfunc>(
-        <ctxarray>,
-        <ctxcount>,
+        &<ctxgroup>,
         <YOLOGNS_UC>_DEFAULT,
-        <YOLOGNS_UC>_FLAGS_DEFAULT,
         <env_color>,
         <env_debug>
     );
     
-}   
+    if (filename) {
+        <yolog_confparse>(&<ctxgroup>, filename);
+        /* if we're a static build, also set the default levels */
+        
+#ifdef GENYL_YL_STATIC
+        <yolog_confparse>(NULL, filename);
+#endif
+
+    }
+    
 EOF
 
+    if ($self->var_env_prefs ne 'NULL') {
+        $templ .= <<"EOF";
+    if (getenv(<env_prefs>)) {
+        <YOLOGNS>_parse_envstr(&<ctxgroup>, getenv(<env_prefs>));
+    }
+EOF
+    }
+    
+    
+    $templ .= "}\n";
+    
     $templ = $self->process_template($templ);
     $self->append_source($templ);
 }
@@ -443,6 +521,8 @@ GetOptions(
 my %ConfMap = (
     'env_color' => ['env_color', undef],
     'env_debug' => ['env_debug', undef],
+    'env_prefs' => ['env_prefs', undef],
+    
     'c89_strict' => ['c89', \$C89Mode],
     'name' => ['symbol_prefix', \$Prefix],
     'macro_prefix' => ['macro_prefix', undef],
@@ -450,7 +530,8 @@ my %ConfMap = (
     'yolog_srcdir' => ['yolog_src', \$YologDir],
     'yolog_static' => ['static', \$UseStatic],
     'var_env_color' => ['env_color', undef],
-    'var_env_debug' => ['env_debug', undef]
+    'var_env_debug' => ['env_debug', undef],
+    'var_env_prefs' => ['env_prefs', undef],
 );
 
 my %confhash;
@@ -547,12 +628,54 @@ sub preprocess_file {
 }
 
 if ($Project->yolog_static) {
-    $final_src .= preprocess_file("$YologDir/yolog.c");
+    
+    $final_src .= <<"EOF";
+/* the following includes needed for APESQ to not try and include
+ * its own header (we're inlining it) */
+
+#if __GNUC__
+#define GENYL__UNUSED __attribute__ ((unused))
+
+#else
+
+#define GENYL__UNUSED
+#endif /* __GNUC__ */
+
+#define APESQ_API static GENYL__UNUSED
+#define GENYL_APESQ_INLINED
+#define APESQ_NO_INCLUDE
+
+EOF
+    my $append_file = sub {
+        my ($fname,$txt) = @_;
+        $final_src .= "#line 0 \"$fname\"\n";
+        
+        if ($txt) {
+            $final_src .= "#line 101010101\n";
+            $final_src .= $txt;
+            $final_src .= "#line 1\n";
+        }
+        
+        $final_src .= preprocess_file("$YologDir/$fname");
+    };
+
+    $append_file->("yolog.c");
+    $append_file->("format.c");
+    $append_file->("apesq/apesq.h");
+    $append_file->("apesq/apesq.c");
+    $append_file->("yoconf.c");
+    
     $final_hdr .= preprocess_file("$YologDir/yolog.h");
+    
 } else {
     $final_hdr .= "#include <yolog.h>\n" . $final_hdr;
     $final_src .= sprintf('#include "%s_yolog.h"',
                          $Project->name) . "\n" . $final_src;
+}
+
+{
+    my $final_name = sprintf("%s/%s_yolog.c", $Project->outdir, $Project->name);
+    $final_src .= "#line 0 \"$final_name\"\n";
 }
 
 $final_src .= $Project->source_buf;

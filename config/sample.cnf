@@ -19,6 +19,8 @@ env_color MYAPP_DEBUG_COLOR
 # Environment variable to enable/modify the debugging level
 env_debug MYAPP_DEBUG_LEVEL
 
+env_prefs MYAPP_DEBUG_PREFS
+
 # Enumerate the subsystems which will have their own output
 # control. This option can be supplied multiple times
 subsys io

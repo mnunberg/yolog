@@ -15,7 +15,7 @@ YOSRC=$(DIR)/yolog_out/myproj_yolog.c
 CFLAGS += -pthread
 
 $(SRC): demo.c
-	-mkdir $(DIR)
+	test -d $(DIR) || mkdir $(DIR)
 	cp $^ $(DIR)/
 
 $(YOSRC): $(YODEPS) $(YOCMD)

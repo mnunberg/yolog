@@ -1,25 +1,18 @@
+
+/* needed for flockfile/funlockfile */
 #if (defined(__unix__) && (!defined(_POSIX_SOURCE)))
 #define _POSIX_SOURCE
 #endif /* __unix__ */
 
-#ifdef __linux__
-#define _GNU_SOURCE
-#endif /* __linux__ */
-
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdarg.h>
-#include <time.h>
 #include <string.h>
 #include <assert.h>
+#include <errno.h>
+#include <ctype.h>
 
 struct yolog_context;
-
-struct yolog_colors_st {
-    const char *co_line;
-    const char *co_title;
-    const char *co_reset;
-};
 
 struct yolog_implicit_st {
     int level;
@@ -32,57 +25,27 @@ struct yolog_implicit_st {
     struct yolog_context *ctx;
 };
 
-#ifdef __unix__
-#include <unistd.h>
-#include <pthread.h>
-#include <sys/types.h>
-
-#ifdef __linux__
-#include <syscall.h>
-/**
- * Linux can get the thread ID,
- * but glibc says it doesn't provide a wrapper for gettid()
- **/
-#define yolog_fprintf_thread(f) fprintf(f, "%lu", syscall(SYS_gettid))
-
-#else /* other POSIX non-linux systems */
-static void
-yolog_fprintf_thread(FILE *f) {
-    pthread_t pt = pthread_self();
-    unsigned char *ptc = (unsigned char*)(void*)(&pt);
-    size_t ii;
-    fprintf(f, "0x");
-
-    for (ii = 0; ii < sizeof(pt); ii++) {
-        fprintf(f, "%02x", (unsigned)(ptc[ii]));
-    }
-}
-#endif /* __linux__ */
-
-
-#define yolog_dest_lock(ctx) flockfile(ctx->dest)
-#define yolog_dest_unlock(ctx) funlockfile(ctx->dest)
-#define yolog_get_pid getpid
-
 /**
  * Stuff for C89-mode logging. We can't use variadic macros
  * so we rely on a shared global context. sucks, it does.
  */
 
+#ifdef __unix__
+#include <pthread.h>
 static pthread_mutex_t Yolog_Global_Mutex;
 
 #define yolog_global_init() pthread_mutex_init(&Yolog_Global_Mutex, NULL)
 #define yolog_global_lock() pthread_mutex_lock(&Yolog_Global_Mutex)
 #define yolog_global_unlock() pthread_mutex_unlock(&Yolog_Global_Mutex)
+#define yolog_dest_lock(ctx) flockfile(ctx->fp)
+#define yolog_dest_unlock(ctx) funlockfile(ctx->fp)
 
 #else
-#define yolog_fprintf_thread(f)
 #define yolog_dest_lock(ctx)
 #define yolog_dest_unlock(ctx)
 #define yolog_global_init()
 #define yolog_global_lock()
 #define yolog_global_unlock()
-#define yolog_get_pid() -1
 #endif /* __unix __ */
 
 #include "yolog.h"
@@ -90,10 +53,16 @@ static pthread_mutex_t Yolog_Global_Mutex;
 static struct yolog_implicit_st Yolog_Implicit;
 static
 yolog_context Yolog_Global_Context = {
-        YOLOG_DEFAULT,
-        YOLOG_FLAGS_DEFAULT,
-        "",
-        NULL
+        YOLOG_LEVEL_UNSET, /* level */
+        NULL, /* parent */
+        { 0 }, /* level settings */
+        "", /* prefix */
+};
+
+static
+yolog_context_group Yolog_Global_CtxGroup = {
+        &Yolog_Global_Context,
+        1
 };
 
 
@@ -114,43 +83,25 @@ yolog_context Yolog_Global_Context = {
 #define _BLACK "0"
 /*Logging subsystem*/
 
-
-
-
-static
-const char *
-yolog_strlevel(yolog_level_t level)
-{
-    if (!level) {
-        return "";
-    }
-
-#define X(n, i) \
-    if (level == i) { return #n; }
-    YOLOG_XLVL(X)
-#undef X
-    return "";
-}
-
+YOLOG_API
 void
-yolog_init_defaults(yolog_context *contexts,
-                    int ncontext,
+yolog_init_defaults(struct yolog_context_group *grp,
                     yolog_level_t default_level,
-                    yolog_flags_t flags,
                     const char *color_env,
                     const char *level_env)
-
 {
     const char *envtmp;
     int itmp = 0, ii;
+    int use_color = 0;
 
+    if (!grp) {
+        grp = &Yolog_Global_CtxGroup;
+    }
 
     if (color_env && (envtmp = getenv(color_env))) {
         sscanf(envtmp, "%d", &itmp);
         if (itmp) {
-            flags |= YOLOG_F_COLOR;
-        } else {
-            flags &= ~(YOLOG_F_COLOR);
+            use_color = 1;
         }
     }
 
@@ -162,60 +113,125 @@ yolog_init_defaults(yolog_context *contexts,
         }
     }
 
-    for (ii = 0; ii < ncontext; ii++) {
-        yolog_context *ctx = contexts + ii;
-        ctx->logfmt = YOLOG_FORMAT_DEFAULT;
+    if (!grp->o_screen.fmtv) {
+        grp->o_screen.fmtv = yolog_fmt_compile(YOLOG_FORMAT_DEFAULT);
+    }
 
-        if (ctx->level == YOLOG_DEFAULT) {
-            ctx->level = default_level;
+    if (use_color) {
+        grp->o_screen.use_color = 1;
+    }
 
-            if (ctx->level == YOLOG_DEFAULT) {
-                ctx->level = YOLOG_INFO;
-            }
-        }
+    if (!grp->o_screen.fp) {
+        grp->o_screen.fp = stderr;
+    }
 
-        ctx->flags |= flags;
-        if (ctx->dest == NULL) {
-            ctx->dest = stderr;
-        }
+    if (default_level == YOLOG_LEVEL_UNSET) {
+        default_level = YOLOG_INFO;
+    }
+
+    grp->o_screen.level = default_level;
+
+    for (ii = 0; ii < grp->ncontexts; ii++) {
+        yolog_context *ctx = grp->contexts + ii;
+        ctx->parent = grp;
 
         if (ctx->prefix == NULL) {
             ctx->prefix = "";
         }
+
+        yolog_sync_levels(ctx);
     }
 
-    if (contexts != &Yolog_Global_Context &&
-            Yolog_Global_Context.dest == NULL) {
-
-        yolog_init_defaults(&Yolog_Global_Context, 1,
+    if (grp != &Yolog_Global_CtxGroup) {
+        yolog_init_defaults(&Yolog_Global_CtxGroup,
                             default_level,
-                            flags,
                             color_env,
                             level_env);
+    } else {
+        yolog_global_init();
     }
-
-    yolog_global_init();
 }
 
-static void
-yolog_get_formats(yolog_context *ctx,
-                  int level,
-                  struct yolog_colors_st *colors)
+static int
+output_can_log(yolog_context *ctx,
+            int level,
+            int oix,
+            struct yolog_output_st *output)
 {
-    if (ctx->flags & YOLOG_F_COLOR) {
+    if (output == NULL) {
+        return 0;
+    }
+
+    if (output->fp == NULL) {
+        return 0;
+    }
+
+    if (ctx->olevels[oix] != YOLOG_LEVEL_UNSET) {
+        if (ctx->olevels[oix] <= level) {
+            return 1;
+        } else {
+            return 0;
+        }
+    }
+
+    if (output->level != YOLOG_LEVEL_UNSET) {
+        if (output->level <= level) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+
+
+static int
+ctx_can_log(yolog_context *ctx,
+            int level,
+            struct yolog_output_st *outputs[YOLOG_OUTPUT_COUNT+1])
+{
+    int ii;
+    outputs[YOLOG_OUTPUT_GFILE] = &ctx->parent->o_file;
+    outputs[YOLOG_OUTPUT_SCREEN] = &ctx->parent->o_screen;
+    outputs[YOLOG_OUTPUT_PFILE] = ctx->o_alt;
+
+    if (ctx->level != YOLOG_LEVEL_UNSET && ctx->level > ctx->level) {
+        return 0;
+    }
+
+    for (ii = 0; ii < YOLOG_OUTPUT_COUNT; ii++) {
+        if (output_can_log(ctx, level, ii, outputs[ii])) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+
+static void
+yolog_get_formats(struct yolog_output_st *output,
+                  int level,
+                  struct yolog_msginfo_st *colors)
+{
+    if (output->use_color) {
 
         colors->co_title = "\033[" _INTENSE_FG _MAGENTA "m";
         colors->co_reset = "\033[0m";
 
         switch(level) {
+
         case YOLOG_CRIT:
         case YOLOG_ERROR:
             colors->co_line = "\033[" _BRIGHT_FG ";" _FG _RED "m";
             break;
+
         case YOLOG_WARN:
             colors->co_line = "\033[" _FG _YELLOW "m";
             break;
+
         case YOLOG_DEBUG:
+        case YOLOG_TRACE:
+        case YOLOG_STATE:
+        case YOLOG_RANT:
             colors->co_line = "\033[" _DIM_FG ";" _FG _CYAN "m";
             break;
         default:
@@ -241,15 +257,16 @@ yolog_vlogger(yolog_context *ctx,
               const char *fmt,
               va_list ap)
 {
-    struct yolog_colors_st colors;
+    struct yolog_msginfo_st msginfo;
     const char *prefix;
-    const char *fmtp;
+    int ii;
+    struct yolog_output_st *outputs[YOLOG_OUTPUT_COUNT];
 
     if (!ctx) {
         ctx = &Yolog_Global_Context;
     }
 
-    if (CAN_LOG(level, ctx) == 0 || ctx->dest == NULL) {
+    if (!ctx_can_log(ctx, level, outputs)) {
         return;
     }
 
@@ -258,84 +275,39 @@ yolog_vlogger(yolog_context *ctx,
         prefix = "-";
     }
 
-    yolog_dest_lock(ctx);
+    if (ctx->parent->cb) {
+        ctx->parent->cb(ctx, level, ap);
+    }
 
-    yolog_get_formats(ctx, level, &colors);
+    msginfo.m_file = file;
+    msginfo.m_level = level;
+    msginfo.m_line = line;
+    msginfo.m_prefix = prefix;
+    msginfo.m_func = fn;
 
-    fmtp = ctx->logfmt;
-    while (*fmtp) {
-        char optbuf[128] = { 0 };
-        int optpos = 0;
+    for (ii = 0; ii < YOLOG_OUTPUT_COUNT; ii++) {
+        struct yolog_output_st *out = outputs[ii];
+        FILE *fp;
+        struct yolog_fmt_st *fmtv;
 
-        if ( !(*fmtp == '%' && fmtp[1] == '(')) {
-            fwrite(fmtp, 1, 1, ctx->dest);
-            fmtp++;
+        if (!output_can_log(ctx, level, ii,  out)) {
             continue;
         }
 
-        fmtp+= 2;
+        fmtv = out->fmtv;
+        fp = out->fp;
 
-        while (*fmtp && *fmtp != ')') {
-            optbuf[optpos] = *fmtp;
-            optpos++;
-            fmtp++;
-        }
+        yolog_get_formats(out, level, &msginfo);
 
-#define _cmpopt(s) (strncmp(optbuf, s, \
-                        optpos > (sizeof(s)-1) \
-                        ? sizeof(s) - 1 : optpos ) \
-                        == 0)
+        yolog_dest_lock(out);
 
-        if (_cmpopt("ep")) {
-            /* epoch */
-            fprintf(ctx->dest, "%lu", time(NULL));
+        yolog_fmt_write(fmtv, fp, &msginfo);
+        vfprintf(fp, fmt, ap);
+        fprintf(fp, "%s\n", msginfo.co_reset);
+        fflush(fp);
 
-
-        } else if (_cmpopt("pi")) {
-            /* pid */
-            fprintf(ctx->dest, "%d", yolog_get_pid());
-
-        } else if (_cmpopt("ti")) {
-            /* tid */
-            yolog_fprintf_thread(ctx->dest);
-
-        } else if (_cmpopt("le")) {
-            /* level */
-            fprintf(ctx->dest, yolog_strlevel(level));
-
-        } else if (_cmpopt("pr")) {
-            /* prefix */
-            fprintf(ctx->dest,
-                    "%s%s%s",
-                    colors.co_title, prefix, colors.co_reset);
-
-        } else if (_cmpopt("fi")) {
-            /* filename */
-            fprintf(ctx->dest, "%s", file);
-
-        } else if (_cmpopt("li")) {
-            /* line */
-            fprintf(ctx->dest, "%d", line);
-
-        } else if (_cmpopt("fu")) {
-            /* function */
-            fprintf(ctx->dest, "%s", fn);
-
-        } else if (_cmpopt("co")) {
-            /* color */
-            fprintf(ctx->dest, "%s", colors.co_line);
-
-        } else {
-            /** Invalid format string */
-        }
-        fmtp++;
+        yolog_dest_unlock(out);
     }
-#undef _cmpopt
-
-    vfprintf(ctx->dest, fmt, ap);
-    fprintf(ctx->dest, "%s\n", colors.co_reset);
-    fflush(ctx->dest);
-    yolog_dest_unlock(ctx);
 }
 
 void
@@ -360,11 +332,12 @@ yolog_implicit_begin(yolog_context *ctx,
                      int line,
                      const char *fn)
 {
+    struct yolog_output_st *outputs[YOLOG_OUTPUT_COUNT];
     if (!ctx) {
         ctx = &Yolog_Global_Context;
     }
 
-    if (CAN_LOG(level, ctx) == 0 || ctx->dest == NULL) {
+    if (!ctx_can_log(ctx, level, outputs)) {
         return 0;
     }
 
@@ -403,4 +376,17 @@ yolog_implicit_logger(const char *fmt, ...)
 yolog_context *
 yolog_get_global(void) {
     return &Yolog_Global_Context;
+}
+
+
+YOLOG_API
+void
+yolog_set_screen_format(yolog_context_group *grp,
+                        const char *format)
+{
+    if (!grp) {
+        grp = &Yolog_Global_CtxGroup;
+    }
+
+    yolog_set_fmtstr(&grp->o_screen, format, 1);
 }

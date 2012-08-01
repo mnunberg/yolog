@@ -1,10 +1,9 @@
 all: libyolog.so demo_static demo_dynamic
 
-
-CFLAGS=-Winit-self -Wall -O0 -ggdb3 -I$(shell pwd)/src
+CFLAGS=-Winit-self -Wall -ggdb3 -DYOLOG_APESQ_STATIC -I$(shell pwd)/src
 export CFLAGS
 
-libyolog.so: src/yolog.c
+libyolog.so: src/yolog.c src/yoconf.c src/format.c
 	$(CC) $(CFLAGS) -std=c89 -pedantic -shared -fPIC -o $@ $^
 
 

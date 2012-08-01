@@ -6,32 +6,33 @@ void *create_func(void *arg)
     log_info("I am a thread!");
     log_io_crit("IO Error!!!");
     log_config_warn("Warning.. Something is wrong..");
+    log_io_rant("IO Ranting!!");
     return NULL;
 }
 
-int main(void)
+int main(int argc, char **argv)
 {
     int ii;
 
     pthread_t threads[10];
     char *newfmt = "[%(level)] PID %(pid) %(epoch) %(tid) %(color)";
+    char *fname = NULL;
+    if (argc == 2) {
+        fname = argv[1];
+    }
 
+    myproj_yolog_init(fname);
 
-    myproj_yolog_init();
     log_error("This is an error");
+    log_config_trace("Reading line 'blah...'");
     log_io_warn("Grrr!!!");
     log_config_crit("Couldn't parse configuration!");
     log_debug("This is a debug message");
-
+    log_info("This is informative");
     log_info("Changing format message");
 
-
-    for (ii = 0; ii < myproj_yolog_subsys_count(); ii++) {
-        myproj_yolog_context *ctx = myproj_yolog_logging_contexts + ii;
-        ctx->logfmt = newfmt;
-    }
-
-    myproj_yolog_get_global()->logfmt = newfmt;
+    myproj_yolog_set_screen_format(&myproj_yolog_log_group, newfmt);
+    myproj_yolog_set_screen_format(NULL, newfmt);
 
     log_error("This should print the timestamp!");
 
