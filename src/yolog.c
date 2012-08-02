@@ -301,13 +301,30 @@ yolog_vlogger(yolog_context *ctx,
 
         yolog_dest_lock(out);
 
+#ifndef va_copy
+#define YOLOG_VACOPY_OVERRIDE
+#ifdef __GNUC__
+#define va_copy __va_copy
+#else
+#define va_copy(dst, src) (dst) = (src)
+#endif /* __GNUC__ */
+#endif
+
         yolog_fmt_write(fmtv, fp, &msginfo);
-        vfprintf(fp, fmt, ap);
+        {
+            va_list vacp;
+            va_copy(vacp, ap);
+            vfprintf(fp, fmt, vacp);
+            va_end(vacp);
+        }
         fprintf(fp, "%s\n", msginfo.co_reset);
         fflush(fp);
-
         yolog_dest_unlock(out);
     }
+#ifdef YOLOG_VACOPY_OVERRIDE
+#undef va_copy
+#undef YOLOG_VACOPY_OVERRIDE
+#endif
 }
 
 void
