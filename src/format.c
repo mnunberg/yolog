@@ -14,7 +14,14 @@
  * Linux can get the thread ID,
  * but glibc says it doesn't provide a wrapper for gettid()
  **/
+
+#ifndef _GNU_SOURCE
+/* if _GNU_SOURCE was defined on the commandline, then we should already have
+ * a prototype
+ */
+
 int syscall(int, ...);
+#endif
 #define yolog_fprintf_thread(f) fprintf(f, "%d", syscall(SYS_gettid))
 
 #else /* other POSIX non-linux systems */
@@ -64,9 +71,9 @@ yolog_fmt_compile(const char *fmtstr)
 {
     const char *fmtp = fmtstr;
     struct yolog_fmt_st *fmtroot, *fmtcur;
-    int n_alloc = sizeof(*fmtroot) * 16;
-    int n_used = 0;
-    int nstr = 0;
+    size_t n_alloc = sizeof(*fmtroot) * 16;
+    size_t n_used = 0;
+    size_t nstr = 0;
 
     fmtroot = malloc(n_alloc);
     fmtcur = fmtroot;
@@ -88,7 +95,7 @@ yolog_fmt_compile(const char *fmtstr)
 
     while (*fmtp) {
         char optbuf[128] = { 0 };
-        int optpos = 0;
+        size_t optpos = 0;
 
         if ( !(*fmtp == '%' && fmtp[1] == '(')) {
             fmtcur->ustr[nstr] = *fmtp;
@@ -211,7 +218,7 @@ yolog_fmt_write(struct yolog_fmt_st *fmts,
             break;
 
         case YOLOG_FMT_LVL:
-            fprintf(fp, yolog_strlevel(minfo->m_level));
+            fprintf(fp, "%s", yolog_strlevel(minfo->m_level));
             break;
 
         case YOLOG_FMT_TITLE:

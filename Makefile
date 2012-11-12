@@ -1,6 +1,6 @@
 all: libyolog.so demo_static demo_dynamic
 
-CFLAGS=-Winit-self -Wall -ggdb3 -DYOLOG_APESQ_STATIC -I$(shell pwd)/src
+CFLAGS=-Winit-self -Wall -Wextra -ggdb3 -DYOLOG_APESQ_STATIC -I$(shell pwd)/src
 export CFLAGS
 export YDEBUG_LEVEL
 export YOCMD
@@ -11,7 +11,7 @@ libyolog.so: src/yolog.c src/yoconf.c src/format.c
 
 
 YOCMD=$(shell pwd)/srcutil/genyolog.pl
-YOARGS=-c $(shell pwd)/config/sample.cnf -y $(shell pwd)/src
+YOARGS=-c $(shell pwd)/config/sample.cnf -y $(shell pwd)/src -K
 
 demo_static:
 	$(MAKE) -C demo \

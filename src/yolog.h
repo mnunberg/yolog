@@ -93,6 +93,9 @@
 #include <stdarg.h>
 
 typedef enum {
+    /* make at least one signed number here */
+    _YOLOG_LEVEL_MAKE_COMPILER_HAPPY = -1,
+
 #define YOLOG_XLVL(X) \
     X(DEFAULT,  0) \
     /* really transient messages */ \

@@ -664,6 +664,10 @@ if ($Project->yolog_static) {
 /* the following includes needed for APESQ to not try and include
  * its own header (we're inlining it) */
 
+#ifdef _MSC_VER
+#pragma warning(disable : 4267)
+#endif
+
 #if __GNUC__
 #define GENYL__UNUSED __attribute__ ((unused))
 

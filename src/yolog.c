@@ -1,4 +1,9 @@
 
+#if __GNUC__ >= 4 && __GNUC_MINOR__ >= 6
+#pragma GCC diagnostic ignored "-Wsign-compare"
+#pragma GCC diagnostic ignored "-Wmissing-field-initializers"
+#endif
+
 /* needed for flockfile/funlockfile */
 #if (defined(__unix__) && (!defined(_POSIX_SOURCE)))
 #define _POSIX_SOURCE
