@@ -14,6 +14,10 @@ YOSRC=$(DIR)/yolog_out/myproj_yolog.c
 
 CFLAGS += -pthread
 
+ifdef YDEBUG_LEVEL
+	CFLAGS += -DMYPROJ_YOLOG_DEBUG_LEVEL=$(YDEBUG_LEVEL)
+endif
+
 $(SRC): demo.c
 	test -d $(DIR) || mkdir $(DIR)
 	cp $^ $(DIR)/
