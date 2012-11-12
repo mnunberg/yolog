@@ -2,6 +2,33 @@
 
 # logging levels
 my @LEVELS = qw(rant trace state debug info warn error crit);
+my $KEEP_LINES = 0;
+
+my $mangle_line_no = sub {
+    my ($num,$fname) = @_;
+    if (!$KEEP_LINES) {
+        return "";
+    }
+    my $txt = "#line $num ";
+    if ($fname) {
+        $txt .= sprintf('"%s"', $fname);
+    }
+    $txt .= "\n";
+    return $txt;
+};
+
+
+my $ILevel = sub {
+    my $lvl = shift;
+    $lvl = lc($lvl);
+    for (my $ii = 0; $ii <= $#LEVELS; $ii++) {
+        if ($LEVELS[$ii] eq $lvl) {
+            return $ii;
+        }
+    }
+    die ("No such level '$lvl'");
+};
+
 
 # misc identifiers/symbols, lower-cased
 # specifically, these are the symbols we wish to define yolog_* *back* to
@@ -12,10 +39,10 @@ my @YOLOG_SYMS_lc = qw(
     set_fmtstr
     set_screen_format
     fmt_st
-    
+
     context
     callback
-    
+
     level_t
     flags_t
     level_info
@@ -67,10 +94,10 @@ sub const_level {
 sub generate {
     my $self = shift;
     my $txt;
-    
+
     if ($self->c89) {
         $txt = <<'EOF';
-        
+
 #define STUBMACRO(args) \
 if (<implicit_begin>( \
     YO__CTX__, \
@@ -98,11 +125,11 @@ EOF
 
     }
     return $txt;
-    
+
 }
 sub preprocess {
     my ($self,$txt) = @_;
-    
+
     my $macro_name = $self->macro_name();
     my $ctxvar = $self->ctxvar();
     my $clevel = $self->const_level();
@@ -128,27 +155,27 @@ struct __PACKAGE__, [
     'yolog_static' => '$',
     'yologns' => '$',
     'env_auto' => '$',
-    
+
     'header_buf' => '$',
     'source_buf' => '$',
-    
+
     'var_implicit_begin' => '$',
     'var_implicit_end' => '$',
     'var_implicit_log' => '$',
-    
+
     'var_logfunc' => '$',
     'var_macro_prefix' => '$',
     'var_ctxarray' => '$',
     'var_ctxtype' => '$',
     'var_grouptype' => '$',
     'var_ctxgroup' => '$',
-    
+
     'var_proj_initfunc' => '$',
     'var_yolog_initfunc' => '$',
     'var_yolog_confparse' => '$',
     'var_proj_infofunc' => '$',
     'var_proj_countfunc' => '$',
-    
+
     'var_env_color' => '$',
     'var_env_debug' => '$',
     'var_env_prefs' => '$',
@@ -160,22 +187,22 @@ my @FNAMES = qw(
     implicit_begin
     implicit_end
     implicit_log
-    
+
     logfunc
     proj_initfunc
     proj_infofunc
     proj_countfunc
-    
+
     yolog_initfunc
     yolog_confparse
-    
+
     ctxtype
     ctxpfix
     ctxcount
     ctxarray
     ctxgroup
     grouptype
-    
+
     env_color
     env_debug
     env_prefs
@@ -185,24 +212,24 @@ my @FNAMES = qw(
 sub create {
     my ($cls,%opts) = @_;
     $opts{var_logfunc} ||= "<YOLOGNS>_logger";
-    
+
     $opts{var_ctxtype} ||= "<YOLOGNS>_context";
     $opts{var_grouptype} = "<YOLOGNS>_context_group";
-    
+
     $opts{var_ctxarray} = "<PROJNS>_logging_contexts";
     $opts{var_ctxgroup} = "<PROJNS>_log_group";
-        
+
     $opts{var_proj_infofunc}    = "<PROJNS>_subsys_info";
     $opts{var_proj_countfunc}   = "<PROJNS>_subsys_count";
     $opts{var_implicit_begin}   = "<YOLOGNS>_implicit_begin";
     $opts{var_implicit_end}     = "<YOLOGNS>_implicit_end";
     $opts{var_implicit_log}     = "<YOLOGNS>_implicit_logger";
-    
+
     $opts{var_yolog_initfunc}   = "<YOLOGNS>_init_defaults";
     $opts{var_yolog_confparse}  = "<YOLOGNS>_parse_file";
-    
+
     $opts{var_proj_initfunc}    = sprintf("%s_yolog_init", $opts{name});
-    
+
     foreach (qw(color debug prefs)) {
         my $k = "var_env_$_";
         if ($opts{$k}) {
@@ -211,11 +238,11 @@ sub create {
             $opts{$k} = "NULL";
         }
     }
-        
+
     $opts{macro_prefix} ||= $opts{name};
     $opts{header_buf} = "";
     $opts{source_buf} = "";
-    
+
     return $cls->new(%opts);
 }
 
@@ -245,19 +272,19 @@ sub append_header {
 
 sub process_namespace {
     my ($self,$buf) = @_;
-    
+
     my $nslc = $self->yologns;
     my $nsuc;
     if ($nslc) {
         $nsuc = uc($nslc);
     }
-    
+
     $nslc ||= "yolog";
     $nsuc ||= "YOLOG";
     my $pns_lc = $self->name . "_yolog";
     my $pns_uc = uc($pns_lc);
-    
-    
+
+
     $buf =~ s/<YOLOGNS>/$nslc/g;
     $buf =~ s/<YOLOGNS_UC>/$nsuc/g;
     $buf =~ s/<PROJNS>/$pns_lc/g;
@@ -294,7 +321,7 @@ sub add_subsys_name {
     my $cname = sprintf("%s_%s",
                         $self->ctxpfix,
                         uc($o->name));
-    
+
     $o->constant($cname);
     push @{$self->subsystems}, $o;
 }
@@ -310,7 +337,7 @@ sub generate_log_macros {
     my ($self,$subsys) = @_;
     my $ctxvar;
     my $prefix;
-    
+
     if ($subsys) {
         $ctxvar = sprintf("%s + %s",
                           $self->var_ctxarray,
@@ -320,24 +347,26 @@ sub generate_log_macros {
         $ctxvar = "NULL";
         $subsys = "";
     }
-    
+
     foreach my $level (@LEVELS) {
         my $mobj = Yolog::DebugMacro->new(prefix => $prefix,
                                           level => $level,
                                           ctxvar => $ctxvar,
                                           proj => $self,
                                           c89 => $self->c89_strict);
-        
-        my $txt = <<'EOF';
-#if (defined <PROJNS_UC>_NDEBUG_LEVEL \
-    && <PROJNS_UC>_NDEBUG_LEVEL > YO__LEVEL__)
-#define STUBMACRO(args)
+
+        my $ilvl = $ILevel->($level);
+
+        my $txt = <<"EOF";
+#if (defined <PROJNS_UC>_DEBUG_LEVEL \\
+    && (<PROJNS_UC>_DEBUG_LEVEL > $ilvl))
+#define STUBMACRO(...)
 #else
 EOF
         $txt .= $mobj->generate();
-        
+
         $txt .= "#endif /* <PROJNS_UC>_NDEBUG_LEVEL */\n";
-        
+
         $txt = $mobj->preprocess($txt);
         $txt = $self->process_template($txt);
         $self->append_header($txt);
@@ -357,7 +386,7 @@ EOF
         $buf .= sprintf("#define %-40s %d\n", $sys->constant, $counter);
         $counter++;
     }
-    
+
     $buf .= sprintf("#define %-40s %d\n", $self->var_ctxcount, $counter);
     $buf .= "\n\n";
     $self->append_header($buf);
@@ -366,7 +395,7 @@ EOF
 
 sub generate_cproto {
     my $self = shift;
-    
+
     my $templ = <<'EOF';
 
 
@@ -388,7 +417,7 @@ void
 #define <PROJNS>_subsys_count() (<ctxcount>)
 
 EOF
-    
+
     if (!$self->yolog_static) {
         $templ = <<'EOF' . $templ;
 
@@ -408,13 +437,13 @@ EOF
 sub generate_cbody {
     my $self = shift;
     my $templ = "";
-    
+
     if ($self->yolog_static) {
         $templ .= "#define GENYL_YL_STATIC\n";
     }
-    
+
     $templ .= <<'EOF';
-    
+
 static <ctxtype> <ctxarray>_real[
     <ctxcount>
 ] = { { 0 } };
@@ -434,46 +463,46 @@ EOF
     foreach my $sys (@{$self->subsystems}) {
         my $prefix = $sys->name;
         my $offset = $sys->constant;
-        
+
         $templ .= <<"EOF";
-   
+
    ctx = <ctxarray> + $offset;
    ctx->prefix = "$prefix";
 EOF
     }
-    
-    
+
+
     my $env_color = sprintf("%s_DEBUG_COLOR", uc $self->name);
     my $env_level = sprintf("%s_DEBUG_LEVEL", uc $self->name);
 
     $templ .= <<"EOF";
-    
+
    /**
     * initialize the group so it contains the
     * contexts and their counts
     */
-    
+
    memset(&<ctxgroup>, 0, sizeof(<ctxgroup>));
    <ctxgroup>.ncontexts = <ctxcount>;
    <ctxgroup>.contexts = <ctxarray>;
-   
+
    <yolog_initfunc>(
         &<ctxgroup>,
         <YOLOGNS_UC>_DEFAULT,
         <env_color>,
         <env_debug>
     );
-    
+
     if (filename) {
         <yolog_confparse>(&<ctxgroup>, filename);
         /* if we're a static build, also set the default levels */
-        
+
 #ifdef GENYL_YL_STATIC
         <yolog_confparse>(NULL, filename);
 #endif
 
     }
-    
+
 EOF
 
     if ($self->var_env_prefs ne 'NULL') {
@@ -483,10 +512,10 @@ EOF
     }
 EOF
     }
-    
-    
+
+
     $templ .= "}\n";
-    
+
     $templ = $self->process_template($templ);
     $self->append_source($templ);
 }
@@ -502,6 +531,7 @@ my $help = <<'EOH';
 -o  --outdir        Output directory
     --c89           Enforce C89 compliant macros
 -y  --yolog-dir     Directory for Yolog Source (for embedding)
+-K  --keep-lines    Insert #line directives in generated source
 EOH
 
 Getopt::Long::Configure("no_ignore_case");
@@ -515,6 +545,7 @@ GetOptions(
     'o|outdir=s' => \my $OutDir,
     'y|yolog-dir=s' => \my $YologDir,
     'c89' => \my $C89Mode,
+    'K|keep-lines' => \$KEEP_LINES
 ) or die $help;
 
 
@@ -522,7 +553,7 @@ my %ConfMap = (
     'env_color' => ['env_color', undef],
     'env_debug' => ['env_debug', undef],
     'env_prefs' => ['env_prefs', undef],
-    
+
     'c89_strict' => ['c89', \$C89Mode],
     'name' => ['symbol_prefix', \$Prefix],
     'macro_prefix' => ['macro_prefix', undef],
@@ -543,7 +574,7 @@ if ($ConfigFile) {
         next if $line =~ /#|;/;
         my ($k,$v) = split(' ', $line);
         next unless defined $v;
-        
+
         chomp($v);
         if ($k eq 'subsys') {
             push @Subsystems, $v;
@@ -628,7 +659,7 @@ sub preprocess_file {
 }
 
 if ($Project->yolog_static) {
-    
+
     $final_src .= <<"EOF";
 /* the following includes needed for APESQ to not try and include
  * its own header (we're inlining it) */
@@ -648,14 +679,14 @@ if ($Project->yolog_static) {
 EOF
     my $append_file = sub {
         my ($fname,$txt) = @_;
-        $final_src .= "#line 0 \"$fname\"\n";
-        
+        $final_src .= $mangle_line_no->(0, $fname);
+
         if ($txt) {
-            $final_src .= "#line 101010101\n";
+            $final_src .= $mangle_line_no->(1010101);
             $final_src .= $txt;
-            $final_src .= "#line 1\n";
+            $final_src .= $mangle_line_no->(1);
         }
-        
+
         $final_src .= preprocess_file("$YologDir/$fname");
     };
 
@@ -664,9 +695,9 @@ EOF
     $append_file->("apesq/apesq.h");
     $append_file->("apesq/apesq.c");
     $append_file->("yoconf.c");
-    
+
     $final_hdr .= preprocess_file("$YologDir/yolog.h");
-    
+
 } else {
     $final_hdr .= "#include <yolog.h>\n" . $final_hdr;
     $final_src .= sprintf('#include "%s_yolog.h"',
@@ -675,7 +706,7 @@ EOF
 
 {
     my $final_name = sprintf("%s/%s_yolog.c", $Project->outdir, $Project->name);
-    $final_src .= "#line 0 \"$final_name\"\n";
+    $final_src .= $mangle_line_no->(0, $final_name);
 }
 
 $final_src .= $Project->source_buf;
